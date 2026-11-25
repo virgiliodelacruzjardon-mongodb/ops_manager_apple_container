@@ -1,6 +1,4 @@
----
-glean_provenance: {"generation_id":"e0567be987a841c891ba643b8d763f32.6","generated_at":"2026-11-25T19:59:34Z","model":"Glean Assistant 571.123"}
----
+
 # Ops Manager Lab on a Mac (Apple container, 16 GB)
 
 This lab installs a complete Ops Manager 8.0 environment inside a 16 GB Linux "container machine" on your Mac, created with Apple's [`container`](https://github.com/apple/container) tool. Two scripts do the work:
