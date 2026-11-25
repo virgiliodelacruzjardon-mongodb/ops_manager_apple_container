@@ -1,4 +1,6 @@
-
+---
+glean_provenance: {"generation_id":"e0567be987a841c891ba643b8d763f32.6","generated_at":"2026-11-25T19:59:34Z","model":"Glean Assistant 571.123"}
+---
 # Ops Manager Lab on a Mac (Apple container, 16 GB)
 
 This lab installs a complete Ops Manager 8.0 environment inside a 16 GB Linux "container machine" on your Mac, created with Apple's [`container`](https://github.com/apple/container) tool. Two scripts do the work:
@@ -185,6 +187,7 @@ MACHINE_MEMORY=8G LOW_RAM=1 FORCE_RAM=1 bash om-lab-mac.sh
 * Your Mac home folder is mounted inside the machine at the same path (`/Users/<you>`), and your user has passwordless `sudo`. This is how the machine sees `~/om-lab`.
 * The machine gets its own IP on a private network (usually `192.168.64.x`). The Mac reaches Ops Manager at `http://<machine-IP>:8080`, and the lab writes that IP to `mms.centralUrl`.
 * The IP can change after the machine restarts. For that reason, Ops Manager does not start by itself at boot on Apple container. `bash om-lab-mac.sh start` updates the URL to the current IP and then starts Ops Manager. To use a fixed name instead, set `OM_HOST` during the install or run `set-url <name>` later.
+* `container machine run` joins the command's arguments and runs them through a shell again (like `ssh`), so quotes, pipes and `$` do not survive. For that reason, `om-lab-mac.sh` writes a small helper, `~/om-lab/.om-lab-probe.sh`, and runs its checks through it with plain words.
 * The machine keeps its data when stopped. Only `delete` removes it.
 * DNS: containers use the container network's DNS by default. If that does not answer (common with a VPN), the script picks another server and writes it to the machine's `/etc/resolv.conf`. The machine can reset that file at boot, so `bash om-lab-mac.sh start` checks DNS again.
 
