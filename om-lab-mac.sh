@@ -32,6 +32,9 @@
 #   FORCE_RAM=1              continue even if the Mac has less than 24 GB
 #   APPDB_PWD=... OM_ADMIN_PWD=...  passwords (else the lab asks inside)
 #   OPEN_BROWSER=0           do not open the browser at the end
+#   DNS_SERVERS="10.1.2.3"   DNS server(s) for the image build and the machine
+#                    (default: auto. Tries the container default, then the Mac's
+#                    DNS servers, then 1.1.1.1 and 8.8.8.8)
 # Any other lab variable (OM_HEAP_MB, APPDB_CACHE_GB, MONGO_VERSION, ...) is
 # passed to setup-opsmanager-lab.sh.
 # =============================================================================
@@ -46,6 +49,9 @@ OPEN_BROWSER=${OPEN_BROWSER:-1}
 LAB_SCRIPT=setup-opsmanager-lab.sh
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 ENVF=""
+LAB_DNS=""            # chosen DNS server(s), empty = container default works
+PROBE_IMAGE=ubuntu:24.04
+PROBE_HOST=archive.ubuntu.com
 LAB_PASS_VARS="APPDB_PWD OM_ADMIN_PWD OM_ADMIN_USER OM_HEAP_MB DAEMON_HEAP_MB APPDB_CACHE_GB MONGO_VERSION MONGOSH_VERSION CREATE_OM_USER OM_WAIT_MIN OM_URL LOW_RAM"
 
 # ------------------------------------------------------------------ helpers
@@ -126,6 +132,7 @@ start_services() {
   else
     container system start --enable-kernel-install
   fi
+  choose_dns
 }
 
 prepare_files() {
@@ -137,23 +144,106 @@ prepare_files() {
   info "$(lab_path)"
 
   if [[ -z ${OM_DEB:-} && -z ${OM_URL:-} ]]; then
-    OM_DEB=$(ls -1 "$WORK_DIR"/mongodb-mms*.deb "$HOME"/Downloads/mongodb-mms*.deb ./mongodb-mms*.deb 2>/dev/null | sort -V | tail -n 1 || true)
+    # Ops Manager is mongodb-mms-<version>...deb; mongodb-mms-automation-agent* is the MongoDB Agent
+    OM_DEB=$(ls -1 "$WORK_DIR"/mongodb-mms-[0-9]*.deb "$HOME"/Downloads/mongodb-mms-[0-9]*.deb \
+      ./mongodb-mms-[0-9]*.deb 2>/dev/null | sort -V | tail -n 1 || true)
   fi
   if [[ -n ${OM_DEB:-} ]]; then
     [[ -f $OM_DEB ]] || die "OM_DEB does not exist: $OM_DEB"
+    case $(basename "$OM_DEB") in
+      *automation-agent*|*mongodb-agent*) die "$(basename "$OM_DEB") is the MongoDB Agent, not Ops Manager.
+$(om_download_hint)" ;;
+    esac
     OM_DEB=$(cd "$(dirname "$OM_DEB")" && pwd)/$(basename "$OM_DEB")
     # Copy it next to the lab script: macOS privacy rules can hide ~/Downloads from the machine
     if [[ $(dirname "$OM_DEB") != "$WORK_DIR" ]]; then cp -f "$OM_DEB" "$WORK_DIR/"; OM_DEB=$WORK_DIR/$(basename "$OM_DEB"); fi
-    case $(basename "$OM_DEB") in mongodb-mms*8.0.*) ;; *) warn "$(basename "$OM_DEB") does not look like Ops Manager 8.0.x; the lab will check it." ;; esac
+    case $(basename "$OM_DEB") in mongodb-mms-8.0.*) ;; *) warn "$(basename "$OM_DEB") does not look like Ops Manager 8.0.x; the lab will check it." ;; esac
     info "Ops Manager package: $OM_DEB"
   elif [[ -n ${OM_URL:-} ]]; then
     info "Ops Manager will be downloaded inside the machine from OM_URL"
   else
+    local agents; agents=$(ls -1 "$WORK_DIR"/mongodb-mms-automation-agent*.deb "$HOME"/Downloads/mongodb-mms-automation-agent*.deb 2>/dev/null | head -n 1 || true)
+    [[ -z $agents ]] || warn "Found $(basename "$agents"): that is the MongoDB Agent, not Ops Manager."
     die "No Ops Manager .deb found in $WORK_DIR or ~/Downloads.
-Download it from https://www.mongodb.com/try/download/ops-manager
-(Version 8.0.x · Platform Debian 12, 13 / Ubuntu 22.04, 24.04 · Package DEB)
-and save it to ~/Downloads, or pass OM_DEB=/path/to/file.deb"
+$(om_download_hint)"
   fi
+}
+
+om_download_hint() {
+  cat <<TXT
+Download Ops Manager from https://www.mongodb.com/try/download/ops-manager
+  Version 8.0.x · Platform "Debian 12, 13 / Ubuntu 22.04, 24.04" · Package DEB
+The file is named like mongodb-mms-8.0.x.<build>.amd64.deb (about 1 GB).
+Save it to ~/Downloads, or pass OM_DEB=/path/to/mongodb-mms-8.0.x....amd64.deb
+TXT
+}
+
+# ---------------------------------------------------------------------- DNS
+mac_dns_servers() { # IPv4 DNS servers macOS is using right now (no loopback)
+  scutil --dns 2>/dev/null | awk '/nameserver\[[0-9]+\]/ { print $3 }' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | grep -v '^127\.' | awk '!seen[$0]++' || true
+}
+
+dns_flags() { # dns_flags "ip1 ip2" -> --dns ip1 --dns ip2
+  local d; for d in $1; do printf -- '--dns %s ' "$d"; done
+}
+
+dns_works() { # dns_works ["ip ..."] -> 0 if a container resolves PROBE_HOST
+  # shellcheck disable=SC2046
+  container run --rm $(dns_flags "${1:-}") "$PROBE_IMAGE" getent hosts "$PROBE_HOST" >/dev/null 2>&1
+}
+
+choose_dns() { # sets LAB_DNS; dies if no DNS works (unless $1 = warn)
+  local c cands
+  if [[ -n ${DNS_SERVERS:-} ]]; then
+    LAB_DNS=$(echo "$DNS_SERVERS" | tr ',' ' ')
+    if dns_works "$LAB_DNS"; then info "DNS: $LAB_DNS (DNS_SERVERS) works"; return 0; fi
+    [[ ${1:-} == warn ]] && { warn "DNS_SERVERS=$LAB_DNS does not resolve $PROBE_HOST from a container."; return 0; }
+    die "DNS_SERVERS=$LAB_DNS does not resolve $PROBE_HOST from a container."
+  fi
+  info "Checking that containers can resolve $PROBE_HOST (needed by apt and the MongoDB downloads)"
+  container image inspect "$PROBE_IMAGE" >/dev/null 2>&1 || container image pull "$PROBE_IMAGE" >/dev/null 2>&1 || true
+  if dns_works ""; then LAB_DNS=""; info "DNS: container default works"; return 0; fi
+  warn "The container default DNS does not answer. Trying other DNS servers."
+  cands="$(mac_dns_servers | tr '\n' ' ') 1.1.1.1 8.8.8.8"
+  for c in $cands; do
+    if dns_works "$c"; then LAB_DNS=$c; info "DNS: $c works and will be used"; return 0; fi
+    info "DNS: $c does not answer"
+  done
+  LAB_DNS=""
+  local msg="No DNS server works from inside a container, so the image build and the lab cannot download anything.
+Common causes: a VPN or a security agent (for example Zscaler) that does not let the
+container network (192.168.64.0/24) out. Try, in this order:
+  1. Disconnect the VPN or pause the agent, then run: bash $0
+  2. Ask IT for an internal DNS server and run: DNS_SERVERS=<ip> bash $0
+  3. Test by hand: container run --rm $PROBE_IMAGE getent hosts $PROBE_HOST"
+  [[ ${1:-} == warn ]] && { warn "$msg"; return 0; }
+  die "$msg"
+}
+
+restart_builder_with_dns() {
+  [[ -n $LAB_DNS ]] || return 0
+  info "Restarting the image builder with DNS $LAB_DNS"
+  container builder stop >/dev/null 2>&1 || true
+  container builder delete --force >/dev/null 2>&1 || true
+  # shellcheck disable=SC2046
+  container builder start $(dns_flags "$LAB_DNS")
+}
+
+machine_dns_ok() { m_run getent hosts "$PROBE_HOST" >/dev/null 2>&1; }
+
+fix_machine_dns() { # the machine regenerates /etc/resolv.conf at boot: fix it if DNS fails
+  if machine_dns_ok; then info "DNS inside: OK"; return 0; fi
+  local c cands
+  if [[ -n ${DNS_SERVERS:-} ]]; then cands=$(echo "$DNS_SERVERS" | tr ',' ' ')
+  else cands="$LAB_DNS $(mac_dns_servers | tr '\n' ' ') 1.1.1.1 8.8.8.8"
+  fi
+  for c in $cands; do
+    m_root sh -c "printf 'nameserver %s\n' $c > /etc/resolv.conf" >/dev/null 2>&1 || continue
+    if machine_dns_ok; then info "DNS inside: fixed, using $c"; return 0; fi
+  done
+  warn "DNS does not work inside the machine (cannot resolve $PROBE_HOST)."
+  return 1
 }
 
 write_dockerfile() {
@@ -185,8 +275,12 @@ build_image() {
     return
   fi
   write_dockerfile
+  restart_builder_with_dns
   info "Building with Rosetta; the first build takes a few minutes"
-  container build --arch amd64 -t "$IMAGE_TAG" -f "$WORK_DIR/Dockerfile" "$WORK_DIR"
+  # shellcheck disable=SC2046
+  container build --arch amd64 $(dns_flags "$LAB_DNS") -t "$IMAGE_TAG" -f "$WORK_DIR/Dockerfile" "$WORK_DIR" \
+    || die "The image build failed. If the log shows 'Temporary failure resolving', DNS does not work
+in the builder: run 'bash $0 check', or pass DNS_SERVERS=<ip> (see the README)."
 }
 
 create_machine() {
@@ -234,6 +328,7 @@ check_machine() {
     else warn "$(lab_path) is not visible inside the machine (home mount missing?)."; ok=0
     fi
   fi
+  fix_machine_dns || ok=0
   info "IP: $(machine_ip)"
   (( ok == 1 )) || die "The machine is not usable for the lab. See the warnings above.
 If the architecture or systemd check fails, Rosetta cannot run this machine: use an x86_64 Linux VM instead."
@@ -285,6 +380,10 @@ cmd_up() {
 
 cmd_check() {
   check_mac
+  if command -v container >/dev/null 2>&1 && container system status >/dev/null 2>&1; then
+    log "Network · DNS from containers"
+    choose_dns warn
+  fi
   if command -v container >/dev/null 2>&1 && container system status >/dev/null 2>&1 && machine_exists; then
     check_machine
   else
@@ -295,6 +394,7 @@ cmd_check() {
 start_lab() {
   log "Starting machine $MACHINE and the lab"
   m_run true
+  fix_machine_dns || warn "Continuing: the lab can start without internet, but downloads will fail."
   container machine run -n "$MACHINE" --root -e OMLAB_PLATFORM=apple-container -- bash "$(lab_path)" start
 }
 
@@ -333,7 +433,7 @@ cmd_delete() {
   info "Deleted. Files in $WORK_DIR are kept."
 }
 
-usage() { sed -n '3,38p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '3,39p' "$0" | sed 's/^# \{0,1\}//'; }
 
 [[ ${OMLAB_MAC_SOURCE_ONLY:-0} == 1 ]] && return 0 2>/dev/null
 case ${1:-up} in

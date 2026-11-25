@@ -26,7 +26,7 @@
 # Optional variables (put them before the command):
 #   OM_DEB=/path/mongodb-mms-8.0.x...deb   Ops Manager package already on disk
 #   OM_URL=https://downloads.mongodb.com/on-prem-mms/deb/...deb   or download it
-#                     (if neither is set, looks for mongodb-mms*.deb in ., ~ and /root)
+#                     (if neither is set, looks for mongodb-mms-<version>*.deb in ., ~ and /root)
 #   MONGO_VERSION=8.0.38   AppDB version (8.0.x only; auto: newest 8.0.x)
 #   APPDB_CACHE_GB=0.5     WiredTiger cache per AppDB member
 #   OM_HEAP_MB=8096        Ops Manager app heap (do not go below 8096 in production)
@@ -275,8 +275,9 @@ find_om_package() {
   fi
   if [[ -z ${OM_DEB:-} ]]; then
     local home; home=$(getent passwd "${SUDO_USER:-root}" | cut -d: -f6)
-    OM_DEB=$(ls -1 ./mongodb-mms*.deb "$home"/mongodb-mms*.deb /root/mongodb-mms*.deb \
-      /Users/*/om-lab/mongodb-mms*.deb /Users/*/Downloads/mongodb-mms*.deb 2>/dev/null | sort -V | tail -n 1 || true)
+    # mongodb-mms-<version>*.deb only: mongodb-mms-automation-agent* is the MongoDB Agent
+    OM_DEB=$(ls -1 ./mongodb-mms-[0-9]*.deb "$home"/mongodb-mms-[0-9]*.deb /root/mongodb-mms-[0-9]*.deb \
+      /Users/*/om-lab/mongodb-mms-[0-9]*.deb /Users/*/Downloads/mongodb-mms-[0-9]*.deb 2>/dev/null | sort -V | tail -n 1 || true)
   fi
   [[ -n ${OM_DEB:-} && -f $OM_DEB ]] || die "No Ops Manager .deb found.
 Download it from https://www.mongodb.com/try/download/ops-manager
@@ -284,6 +285,10 @@ Download it from https://www.mongodb.com/try/download/ops-manager
   sudo OM_DEB=/path/to/mongodb-mms-8.0.x.deb bash $0
 or pass the copied link with OM_URL=..."
   OM_DEB=$(readlink -f "$OM_DEB")
+  local pkg; pkg=$(dpkg-deb -f "$OM_DEB" Package 2>/dev/null || true)
+  [[ $pkg != mongodb-mms-automation-agent* ]] || die "$(basename "$OM_DEB") is the MongoDB Agent ($pkg), not Ops Manager.
+Download Ops Manager (mongodb-mms-8.0.x....amd64.deb) from https://www.mongodb.com/try/download/ops-manager"
+  [[ -z $pkg || $pkg == mongodb-mms ]] || die "$(basename "$OM_DEB") is package '$pkg', not Ops Manager (mongodb-mms)."
   local ver; ver=$(dpkg-deb -f "$OM_DEB" Version 2>/dev/null || true)
   [[ $ver == 8.0.* ]] || die "Expected an Ops Manager 8.0.x package and found '${ver:-unreadable}' ($OM_DEB)."
   OM_VERSION=$ver

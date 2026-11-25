@@ -1,4 +1,6 @@
-
+---
+glean_provenance: {"generation_id":"e0567be987a841c891ba643b8d763f32.5","generated_at":"2026-11-25T19:50:49Z","model":"Glean Assistant 571.123"}
+---
 # Ops Manager Lab on a Mac (Apple container, 16 GB)
 
 This lab installs a complete Ops Manager 8.0 environment inside a 16 GB Linux "container machine" on your Mac, created with Apple's [`container`](https://github.com/apple/container) tool. Two scripts do the work:
@@ -41,7 +43,7 @@ Why MongoDB 8.0 for the AppDB: Ops Manager 8.0 supports MongoDB 7.0 and 8.0 for 
 
 ## Quick start
 
-1. Download Ops Manager from the [MongoDB Download Center](https://www.mongodb.com/try/download/ops-manager): Version 8.0.x, Platform "Debian 12, 13 / Ubuntu 22.04, 24.04", Package DEB. Leave it in `~/Downloads`.
+1. Download Ops Manager from the [MongoDB Download Center](https://www.mongodb.com/try/download/ops-manager): Version 8.0.x, Platform "Debian 12, 13 / Ubuntu 22.04, 24.04", Package DEB. Leave it in `~/Downloads`. The right file is named like `mongodb-mms-8.0.x.<build>.amd64.deb` (about 1 GB). A file named `mongodb-mms-automation-agent-manager_...deb` is the MongoDB Agent, not Ops Manager, and the scripts ignore it.
 2. Put `om-lab-mac.sh` and `setup-opsmanager-lab.sh` in the same folder (for example `~/om-lab`).
 3. Open Terminal and run, as your normal user (no `sudo`):
 
@@ -62,15 +64,15 @@ To skip the password prompts, pass them before the command: `APPDB_PWD='...' OM_
 ## What `om-lab-mac.sh` does
 
 
-| Step | Name                 | What happens                                                                                                                                                                      |
-| ---- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | Check the Mac        | macOS version, Apple silicon, physical RAM (machine memory + 8 GB), Rosetta, `container` CLI. Offers to install Rosetta and `container`                                           |
-| 2    | Start services       | `container system start --enable-kernel-install` (only if not running)                                                                                                            |
-| 3    | Prepare files        | Copies `setup-opsmanager-lab.sh` and the `.deb` to `~/om-lab`, which the machine can see                                                                                          |
-| 4    | Build the image      | Writes a `Dockerfile` (Ubuntu 24.04 + systemd) and runs `container build --arch amd64 -t local/om-lab-ubuntu:24.04`. Skipped if the image exists                                  |
-| 5    | Create the machine   | `container machine create --arch amd64 --cpus 4 --memory 16G --name om-lab local/om-lab-ubuntu:24.04`. Skipped if it exists                                                       |
-| 6    | Check the machine    | `x86_64` architecture, systemd as PID 1, at least 15360 MB of memory, free disk, home folder mounted, IP. Stops here if a check fails                                              |
-| 7    | Install the lab      | Runs `sudo bash ~/om-lab/setup-opsmanager-lab.sh setup` inside the machine. If the lab is already installed, it starts it instead. Then it opens Ops Manager in the browser       |
+| Step | Name                | What happens                                                                                                                                                                                                                                    |
+| ---- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | Check the Mac       | macOS version, Apple silicon, physical RAM (machine memory + 8 GB), Rosetta, `container` CLI. Offers to install Rosetta and `container`                                                                                                         |
+| 2    | Start services, DNS | `container system start --enable-kernel-install` (only if not running). Checks that a container can resolve `archive.ubuntu.com`. If the default DNS fails, tries the Mac's DNS servers, then 1.1.1.1 and 8.8.8.8, and stops if none works      |
+| 3    | Prepare files       | Copies `setup-opsmanager-lab.sh` and the `.deb` to `~/om-lab`, which the machine can see                                                                                                                                                        |
+| 4    | Build the image     | Writes a `Dockerfile` (Ubuntu 24.04 + systemd) and runs `container build --arch amd64 -t local/om-lab-ubuntu:24.04`. If step 2 chose a DNS server, it restarts the builder with `--dns` and passes it to the build. Skipped if the image exists |
+| 5    | Create the machine  | `container machine create --arch amd64 --cpus 4 --memory 16G --name om-lab local/om-lab-ubuntu:24.04`. Skipped if it exists                                                                                                                     |
+| 6    | Check the machine   | `x86_64` architecture, systemd as PID 1, at least 15360 MB of memory, free disk, home folder mounted, DNS (fixes `/etc/resolv.conf` if needed), IP. Stops here if a check fails                                                                 |
+| 7    | Install the lab     | Runs `sudo bash ~/om-lab/setup-opsmanager-lab.sh setup` inside the machine. If the lab is already installed, it starts it instead. Then it opens Ops Manager in the browser                                                                     |
 
 
 You can run `bash om-lab-mac.sh` again at any time: steps that are already done are skipped.
@@ -78,17 +80,17 @@ You can run `bash om-lab-mac.sh` again at any time: steps that are already done 
 ## Commands (on the Mac)
 
 
-| Command                        | What it does                                                                              |
-| ------------------------------ | ----------------------------------------------------------------------------------------- |
-| `bash om-lab-mac.sh`           | All 7 steps (same as `up`)                                                                |
-| `bash om-lab-mac.sh check`     | Checks the Mac, and the machine if it exists. Installs nothing                            |
-| `bash om-lab-mac.sh status`    | Machine list plus the lab status (AppDB members and Ops Manager)                          |
-| `bash om-lab-mac.sh start`     | Boots the machine, starts the AppDB, updates the Ops Manager URL if the IP changed, starts Ops Manager |
-| `bash om-lab-mac.sh stop`      | Stops Ops Manager and the AppDB, then the machine, so macOS gets its memory back          |
-| `bash om-lab-mac.sh open`      | Opens Ops Manager in the browser                                                          |
-| `bash om-lab-mac.sh shell`     | Opens a shell inside the machine                                                          |
-| `bash om-lab-mac.sh delete`    | Deletes the machine and all lab data (asks first). `IMAGE=1` also deletes the image       |
-| `bash om-lab-mac.sh help`      | Shows the built-in help                                                                   |
+| Command                     | What it does                                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `bash om-lab-mac.sh`        | All 7 steps (same as `up`)                                                                             |
+| `bash om-lab-mac.sh check`  | Checks the Mac, and the machine if it exists. Installs nothing                                         |
+| `bash om-lab-mac.sh status` | Machine list plus the lab status (AppDB members and Ops Manager)                                       |
+| `bash om-lab-mac.sh start`  | Boots the machine, starts the AppDB, updates the Ops Manager URL if the IP changed, starts Ops Manager |
+| `bash om-lab-mac.sh stop`   | Stops Ops Manager and the AppDB, then the machine, so macOS gets its memory back                       |
+| `bash om-lab-mac.sh open`   | Opens Ops Manager in the browser                                                                       |
+| `bash om-lab-mac.sh shell`  | Opens a shell inside the machine                                                                       |
+| `bash om-lab-mac.sh delete` | Deletes the machine and all lab data (asks first). `IMAGE=1` also deletes the image                    |
+| `bash om-lab-mac.sh help`   | Shows the built-in help                                                                                |
 
 
 Always stop the lab with `bash om-lab-mac.sh stop` when you finish. Running `container machine stop` directly can stop Ops Manager without its AppDB in the right order.
@@ -96,14 +98,14 @@ Always stop the lab with `bash om-lab-mac.sh stop` when you finish. Running `con
 Inside the machine (`bash om-lab-mac.sh shell`), the lab commands are also available:
 
 
-| Command                                             | What it does                                                                         |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `sudo bash ~/om-lab/setup-opsmanager-lab.sh status`  | Each AppDB member (service, PRIMARY/SECONDARY) and the Ops Manager HTTP status      |
-| `sudo bash ~/om-lab/setup-opsmanager-lab.sh stop`    | Stops in order: Ops Manager, then the AppDB members                                 |
-| `sudo bash ~/om-lab/setup-opsmanager-lab.sh start`   | Starts in order: AppDB, waits for a PRIMARY, then Ops Manager                       |
-| `sudo bash ~/om-lab/setup-opsmanager-lab.sh url`     | Shows `mms.centralUrl`                                                              |
-| `sudo bash ~/om-lab/setup-opsmanager-lab.sh set-url [HOST]` | Changes `mms.centralUrl` (default: the machine IP) and restarts Ops Manager  |
-| `sudo bash ~/om-lab/setup-opsmanager-lab.sh reset`   | Deletes the lab and uninstalls Ops Manager (asks you to type `DELETE`)              |
+| Command                                                     | What it does                                                                   |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `sudo bash ~/om-lab/setup-opsmanager-lab.sh status`         | Each AppDB member (service, PRIMARY/SECONDARY) and the Ops Manager HTTP status |
+| `sudo bash ~/om-lab/setup-opsmanager-lab.sh stop`           | Stops in order: Ops Manager, then the AppDB members                            |
+| `sudo bash ~/om-lab/setup-opsmanager-lab.sh start`          | Starts in order: AppDB, waits for a PRIMARY, then Ops Manager                  |
+| `sudo bash ~/om-lab/setup-opsmanager-lab.sh url`            | Shows `mms.centralUrl`                                                         |
+| `sudo bash ~/om-lab/setup-opsmanager-lab.sh set-url [HOST]` | Changes `mms.centralUrl` (default: the machine IP) and restarts Ops Manager    |
+| `sudo bash ~/om-lab/setup-opsmanager-lab.sh reset`          | Deletes the lab and uninstalls Ops Manager (asks you to type `DELETE`)         |
 
 
 ## Options for `om-lab-mac.sh`
@@ -111,24 +113,26 @@ Inside the machine (`bash om-lab-mac.sh shell`), the lab commands are also avail
 Put the variables before the command, for example `MACHINE_CPUS=6 bash om-lab-mac.sh`.
 
 
-| Variable         | Default                     | Purpose                                                                           |
-| ---------------- | --------------------------- | --------------------------------------------------------------------------------- |
-| `OM_DEB`         | auto                        | Ops Manager `.deb`. If not set: newest `mongodb-mms*.deb` in `~/om-lab`, `~/Downloads` or the current folder |
-| `OM_URL`         | none                        | Download link for the `.deb`, used instead of `OM_DEB`                            |
-| `MACHINE`        | om-lab                      | Machine name                                                                      |
-| `MACHINE_MEMORY` | 16G                         | Machine memory. The lab needs at least 15360 MB inside                            |
-| `MACHINE_CPUS`   | 4                           | Machine vCPUs                                                                     |
-| `IMAGE_TAG`      | local/om-lab-ubuntu:24.04   | Image name                                                                        |
-| `WORK_DIR`       | ~/om-lab                    | Folder shared with the machine. Must be inside your home folder                   |
-| `REBUILD`        | 0                           | Set to `1` to rebuild the image                                                   |
-| `FORCE_RAM`      | 0                           | Set to `1` to continue on a Mac with less RAM than the machine + 8 GB             |
-| `OPEN_BROWSER`   | 1                           | Set to `0` to not open the browser                                                |
-| `IMAGE`          | 0                           | With `delete`: set to `1` to also delete the image                                |
+| Variable         | Default                   | Purpose                                                                                                                                            |
+| ---------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OM_DEB`         | auto                      | Ops Manager `.deb`. If not set: newest `mongodb-mms*.deb` in `~/om-lab`, `~/Downloads` or the current folder                                       |
+| `OM_URL`         | none                      | Download link for the `.deb`, used instead of `OM_DEB`                                                                                             |
+| `MACHINE`        | om-lab                    | Machine name                                                                                                                                       |
+| `MACHINE_MEMORY` | 16G                       | Machine memory. The lab needs at least 15360 MB inside                                                                                             |
+| `MACHINE_CPUS`   | 4                         | Machine vCPUs                                                                                                                                      |
+| `IMAGE_TAG`      | local/om-lab-ubuntu:24.04 | Image name                                                                                                                                         |
+| `WORK_DIR`       | \~/om-lab                 | Folder shared with the machine. Must be inside your home folder                                                                                    |
+| `REBUILD`        | 0                         | Set to `1` to rebuild the image                                                                                                                    |
+| `FORCE_RAM`      | 0                         | Set to `1` to continue on a Mac with less RAM than the machine + 8 GB                                                                              |
+| `OPEN_BROWSER`   | 1                         | Set to `0` to not open the browser                                                                                                                 |
+| `IMAGE`          | 0                         | With `delete`: set to `1` to also delete the image                                                                                                 |
+| `DNS_SERVERS`    | auto                      | DNS server(s) for the image build and the machine, for example `DNS_SERVERS=10.1.2.3`. Use it when the automatic choice fails (VPN, corporate DNS) |
 
 
 These lab variables are passed to the machine: `APPDB_PWD`, `OM_ADMIN_PWD`, `OM_ADMIN_USER`, `OM_HEAP_MB`, `DAEMON_HEAP_MB`, `APPDB_CACHE_GB`, `MONGO_VERSION`, `MONGOSH_VERSION`, `CREATE_OM_USER`, `OM_WAIT_MIN`, `OM_URL`, `LOW_RAM`. See the next section.
 
 ## Options for `setup-opsmanager-lab.sh`
+
 
 | Variable          | Default       | Purpose                                                                                                                                 |
 | ----------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -184,6 +188,7 @@ MACHINE_MEMORY=8G LOW_RAM=1 FORCE_RAM=1 bash om-lab-mac.sh
 * The machine gets its own IP on a private network (usually `192.168.64.x`). The Mac reaches Ops Manager at `http://<machine-IP>:8080`, and the lab writes that IP to `mms.centralUrl`.
 * The IP can change after the machine restarts. For that reason, Ops Manager does not start by itself at boot on Apple container. `bash om-lab-mac.sh start` updates the URL to the current IP and then starts Ops Manager. To use a fixed name instead, set `OM_HOST` during the install or run `set-url <name>` later.
 * The machine keeps its data when stopped. Only `delete` removes it.
+* DNS: containers use the container network's DNS by default. If that does not answer (common with a VPN), the script picks another server and writes it to the machine's `/etc/resolv.conf`. The machine can reset that file at boot, so `bash om-lab-mac.sh start` checks DNS again.
 
 ## Running on a Linux server instead
 
@@ -213,7 +218,7 @@ Do not run it next to the sharded cluster lab (`setup-sharded-lab.sh`): together
 | `/opt/mongodb/mms/conf/conf-mms.properties` | Ops Manager settings (original saved as `.orig`)                                 |
 | `/opt/mongodb/mms/conf/mms.conf`            | Ops Manager JVM settings (original saved as `.orig`)                             |
 | `/opt/mongodb/mms/logs/mms0.log`            | Ops Manager application log                                                      |
-| `/var/tmp/om-lab`                           | Copy of the `.deb` when it comes from the Mac home folder                         |
+| `/var/tmp/om-lab`                           | Copy of the `.deb` when it comes from the Mac home folder                        |
 
 
 On the Mac, `~/om-lab` holds the two scripts, the `.deb` and the generated `Dockerfile`.
@@ -249,20 +254,23 @@ Ops Manager settings applied in `conf-mms.properties`:
 ### On the Mac
 
 
-| Symptom                                                | What to do                                                                                                                                  |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| "Do not use sudo"                                      | Run `bash om-lab-mac.sh` as your normal user. The script uses `--root` inside the machine when it needs to                                |
-| "The machine takes 16G and macOS needs ~8 GB more"     | Use a Mac with more RAM, or see "Smaller Macs"                                                                                              |
-| "No Ops Manager .deb found"                            | Download it to `~/Downloads`, or pass `OM_DEB=/path/to/file.deb`                                                                            |
-| `container build` fails                                | Run `container system start` and try again with `REBUILD=1`. Check the internet connection (it pulls `ubuntu:24.04`)                       |
-| Step 6: architecture is `aarch64`                      | The machine is not running as x86_64. Ops Manager is not packaged for ARM, so the lab cannot run. Use an x86_64 Linux VM                    |
-| Step 6: PID 1 is not systemd                           | The image or Rosetta setup is not working. Delete the machine (`bash om-lab-mac.sh delete`) and run `REBUILD=1 bash om-lab-mac.sh`          |
-| Step 6: memory inside is too low                       | `container machine set -n om-lab memory=17G`, then `container machine stop om-lab` and `bash om-lab-mac.sh` again                          |
-| Step 6: home folder not visible                        | Your home folder is not mounted. Re-create the machine (`delete`, then `bash om-lab-mac.sh`)                                                |
-| "mongod stopped with 'Illegal instruction'"            | Rosetta does not provide AVX, which MongoDB 5.0+ needs on x86_64. Update macOS (Rosetta added AVX/AVX2 in macOS 15)                        |
-| Ops Manager's Java crashes with `SIGSEGV`              | x86 Java under Rosetta has had crashes like this before. Use an x86_64 Linux VM                                                             |
-| The browser cannot open Ops Manager after a restart    | The IP changed. Run `bash om-lab-mac.sh start`, or inside the machine `sudo bash ~/om-lab/setup-opsmanager-lab.sh set-url`                 |
-| The Mac is slow                                        | Stop the lab with `bash om-lab-mac.sh stop` when you are not using it                                                                       |
+| Symptom                                             | What to do                                                                                                                                                                                                                                                                                                                     |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| "Do not use sudo"                                   | Run `bash om-lab-mac.sh` as your normal user. The script uses `--root` inside the machine when it needs to                                                                                                                                                                                                                     |
+| "The machine takes 16G and macOS needs \~8 GB more" | Use a Mac with more RAM, or see "Smaller Macs"                                                                                                                                                                                                                                                                                 |
+| "No Ops Manager .deb found"                         | Download it to `~/Downloads`, or pass `OM_DEB=/path/to/file.deb`                                                                                                                                                                                                                                                               |
+| "... is the MongoDB Agent, not Ops Manager"         | You downloaded `mongodb-mms-automation-agent-manager_...deb`. Download the Ops Manager package (`mongodb-mms-8.0.x...amd64.deb`) instead                                                                                                                                                                                       |
+| The build says "Temporary failure resolving"        | DNS does not work in the image builder. Run `bash om-lab-mac.sh check` to see which DNS servers answer, then `DNS_SERVERS=<ip> bash om-lab-mac.sh`. To make it permanent, add `[container.dns]` with `nameservers = ["<ip>"]` to `~/.config/container/config.toml`, then run `container system stop && container system start` |
+| "No DNS server works from inside a container"       | Usually a VPN or a security agent (for example Zscaler) that blocks the container network. Disconnect or pause it and try again, or ask IT for an internal DNS server for `DNS_SERVERS`. If the network also needs an HTTP proxy, DNS alone will not fix it                                                                    |
+| `container build` fails for another reason          | Run `container system start` and try again with `REBUILD=1`                                                                                                                                                                                                                                                                    |
+| Step 6: architecture is `aarch64`                   | The machine is not running as x86_64. Ops Manager is not packaged for ARM, so the lab cannot run. Use an x86_64 Linux VM                                                                                                                                                                                                       |
+| Step 6: PID 1 is not systemd                        | The image or Rosetta setup is not working. Delete the machine (`bash om-lab-mac.sh delete`) and run `REBUILD=1 bash om-lab-mac.sh`                                                                                                                                                                                             |
+| Step 6: memory inside is too low                    | `container machine set -n om-lab memory=17G`, then `container machine stop om-lab` and `bash om-lab-mac.sh` again                                                                                                                                                                                                              |
+| Step 6: home folder not visible                     | Your home folder is not mounted. Re-create the machine (`delete`, then `bash om-lab-mac.sh`)                                                                                                                                                                                                                                   |
+| "mongod stopped with 'Illegal instruction'"         | Rosetta does not provide AVX, which MongoDB 5.0+ needs on x86_64. Update macOS (Rosetta added AVX/AVX2 in macOS 15)                                                                                                                                                                                                            |
+| Ops Manager's Java crashes with `SIGSEGV`           | x86 Java under Rosetta has had crashes like this before. Use an x86_64 Linux VM                                                                                                                                                                                                                                                |
+| The browser cannot open Ops Manager after a restart | The IP changed. Run `bash om-lab-mac.sh start`, or inside the machine `sudo bash ~/om-lab/setup-opsmanager-lab.sh set-url`                                                                                                                                                                                                     |
+| The Mac is slow                                     | Stop the lab with `bash om-lab-mac.sh stop` when you are not using it                                                                                                                                                                                                                                                          |
 
 
 ### In the lab
@@ -270,12 +278,12 @@ Ops Manager settings applied in `conf-mms.properties`:
 
 | Symptom                                                      | What to check                                                                                                                             |
 | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| "This script is sized for 16 GB..."                          | The system reports less than 15 GB. Check `free -h`. Give the machine more memory or use `LOW_RAM=1`                                       |
+| "This script is sized for 16 GB..."                          | The system reports less than 15 GB. Check `free -h`. Give the machine more memory or use `LOW_RAM=1`                                      |
 | "Expected an Ops Manager 8.0.x package"                      | The `.deb` is another version. This lab only covers 8.0.x                                                                                 |
 | "MONGO_VERSION must be 8.0.x"                                | 8\.2 and 8.3 are not supported for the AppDB. Use an 8.0.x version                                                                        |
 | "Port ... is in use"                                         | Find the process with `sudo ss -ltnp`                                                                                                     |
 | "A lab already exists" or "Ops Manager is already installed" | Run `sudo bash ~/om-lab/setup-opsmanager-lab.sh reset` inside the machine, then `bash om-lab-mac.sh` again                                |
-| Ops Manager does not answer in time                          | Look at `/opt/mongodb/mms/logs/mms0.log` and `mms0-startup.log`. Under Rosetta you can wait longer with `OM_WAIT_MIN=60`                   |
+| Ops Manager does not answer in time                          | Look at `/opt/mongodb/mms/logs/mms0.log` and `mms0-startup.log`. Under Rosetta you can wait longer with `OM_WAIT_MIN=60`                  |
 | `OutOfMemoryError` in `mms0.log`                             | Raise `OM_HEAP_MB` or reduce `APPDB_CACHE_GB`, then `reset` and set up again, or edit `mms.conf` and restart `mongodb-mms`                |
 | The first user could not be created through the API          | Set `mms.user.invitationOnly=false` in `conf-mms.properties`, run `sudo systemctl restart mongodb-mms`, and use Sign Up on the login page |
 | An AppDB member does not start                               | `sudo tail -n 50 /var/log/mongodb/appdb-1.log`                                                                                            |
@@ -306,3 +314,4 @@ Both scripts pass `bash -n`. `setup-opsmanager-lab.sh` was run end to end in a s
 * [Apple container: Container machine](https://github.com/apple/container/blob/main/docs/container-machine.md)
 * [Apple container: Command reference](https://github.com/apple/container/blob/main/docs/command-reference.md)
 * [Apple container: Networking](https://github.com/apple/container/blob/main/docs/networking.md)
+
