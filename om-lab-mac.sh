@@ -65,13 +65,49 @@ ask_yes() { # ask_yes "question" -> 0 if yes
   [[ $a == y || $a == Y || $a == yes || $a == s || $a == S ]]
 }
 
+# 'container machine run' joins the arguments and runs them through a shell again
+# (like ssh), so quotes, pipes and $ are lost. Only send plain words: anything
+# more complex goes through the helper script below (m_probe / m_probe_root).
 m_run()  { container machine run -n "$MACHINE" -- "$@"; }          # as your user
 m_root() { container machine run -n "$MACHINE" --root -- "$@"; }   # as root
+PROBE_SCRIPT_NAME=.om-lab-probe.sh
+probe_path() { echo "$WORK_DIR/$PROBE_SCRIPT_NAME"; }
+
+write_probe() { # helper that runs inside the machine (shared through the home folder)
+  mkdir -p "$WORK_DIR"
+  cat > "$(probe_path)" <<'PROBE'
+#!/bin/sh
+# Written by om-lab-mac.sh. Runs inside the container machine. Do not edit.
+case "$1" in
+  arch)  uname -m ;;
+  init)  ps -p 1 -o comm= 2>/dev/null | tr -d ' ' ;;
+  state) systemctl is-system-running --wait 2>/dev/null || true ;;
+  memmb) awk '/^MemTotal:/ { printf "%d\n", $2 / 1024 }' /proc/meminfo ;;
+  diskgb) df -Pk / | awk 'NR == 2 { printf "%d\n", $4 / 1024 / 1024 }' ;;
+  ip)
+    ip=$(hostname -I 2>/dev/null | awk '{ print $1 }')
+    [ -n "$ip" ] || ip=$(ip -4 -o addr show scope global 2>/dev/null | awk '{ sub(/\/.*/, "", $4); print $4; exit }')
+    echo "$ip" ;;
+  dns-ok) getent hosts "${2:-archive.ubuntu.com}" >/dev/null 2>&1 ;;
+  dns-show) grep -E '^(nameserver|search)' /etc/resolv.conf 2>/dev/null || echo "(empty /etc/resolv.conf)" ;;
+  set-dns) # set-dns IP [IP ...]  (as root)
+    shift
+    [ "$#" -gt 0 ] || exit 2
+    [ -L /etc/resolv.conf ] && rm -f /etc/resolv.conf
+    { echo "# set by om-lab-mac.sh"; for d in "$@"; do echo "nameserver $d"; done; } > /etc/resolv.conf.om-lab
+    cat /etc/resolv.conf.om-lab > /etc/resolv.conf ;;
+  *) echo "unknown probe: $1" >&2; exit 2 ;;
+esac
+PROBE
+  chmod 755 "$(probe_path)"
+}
+m_probe()      { m_run  sh "$(probe_path)" "$@" 2>/dev/null | tr -d '\r'; }
+m_probe_root() { m_root sh "$(probe_path)" "$@" 2>/dev/null | tr -d '\r'; }
 machine_exists() { container machine inspect "$MACHINE" >/dev/null 2>&1; }
 image_exists()   { container image inspect "$IMAGE_TAG" >/dev/null 2>&1; }
 lab_installed()  { m_root test -f /etc/mongodb-om-lab/lab.env >/dev/null 2>&1; }
 lab_path()       { echo "$WORK_DIR/$LAB_SCRIPT"; }
-machine_ip()     { m_run sh -c "hostname -I 2>/dev/null | awk '{print \$1}'" 2>/dev/null | tr -d '\r'; }
+machine_ip()     { m_probe ip | tail -n 1; }
 
 mem_to_mb() { # 16G / 16384M / 16g -> MB
   local v; v=$(echo "$1" | tr '[:lower:]' '[:upper:]')
@@ -230,19 +266,23 @@ restart_builder_with_dns() {
   container builder start $(dns_flags "$LAB_DNS")
 }
 
-machine_dns_ok() { m_run getent hosts "$PROBE_HOST" >/dev/null 2>&1; }
+machine_dns_ok() { m_run sh "$(probe_path)" dns-ok "$PROBE_HOST" >/dev/null 2>&1; }
 
 fix_machine_dns() { # the machine regenerates /etc/resolv.conf at boot: fix it if DNS fails
   if machine_dns_ok; then info "DNS inside: OK"; return 0; fi
-  local c cands
+  local c cands before
+  before=$(m_probe dns-show | tr '\n' ' ')
+  info "DNS inside: default does not answer (${before:-?}). Trying other servers."
   if [[ -n ${DNS_SERVERS:-} ]]; then cands=$(echo "$DNS_SERVERS" | tr ',' ' ')
   else cands="$LAB_DNS $(mac_dns_servers | tr '\n' ' ') 1.1.1.1 8.8.8.8"
   fi
   for c in $cands; do
-    m_root sh -c "printf 'nameserver %s\n' $c > /etc/resolv.conf" >/dev/null 2>&1 || continue
+    m_root sh "$(probe_path)" set-dns "$c" >/dev/null 2>&1 || continue
     if machine_dns_ok; then info "DNS inside: fixed, using $c"; return 0; fi
+    info "DNS inside: $c does not answer"
   done
   warn "DNS does not work inside the machine (cannot resolve $PROBE_HOST)."
+  warn "Test it with: bash $0 shell   then: getent hosts $PROBE_HOST ; cat /etc/resolv.conf"
   return 1
 }
 
@@ -297,20 +337,21 @@ create_machine() {
 check_machine() {
   log "Step 6/7 · Checking the machine"
   local arch mem_mb need_mb init state disk_gb ok=1
-  arch=$(m_run uname -m | tr -d '\r')
+  write_probe
+  arch=$(m_probe arch | tail -n 1)
   if [[ $arch == x86_64 ]]; then info "Architecture: x86_64 (Rosetta)"
   else warn "Architecture is '$arch', not x86_64. Ops Manager and MongoDB for this lab are x86_64 only."; ok=0
   fi
 
-  init=$(m_run ps -p 1 -o comm= 2>/dev/null | tr -d '\r ' || true)
+  init=$(m_probe init | tail -n 1)
   if [[ $init == systemd ]]; then
-    state=$(m_run systemctl is-system-running --wait 2>/dev/null | tr -d '\r' || true)
+    state=$(m_probe state | tail -n 1)
     info "systemd: PID 1 · state ${state:-unknown} (running or degraded is fine)"
   else
     warn "PID 1 is '${init:-unknown}', not systemd. The lab needs systemd."; ok=0
   fi
 
-  mem_mb=$(m_run sh -c "awk '/MemTotal/ {printf \"%d\", \$2/1024}' /proc/meminfo" | tr -d '\r')
+  mem_mb=$(m_probe memmb | tail -n 1); [[ $mem_mb =~ ^[0-9]+$ ]] || mem_mb=0
   need_mb=15360; [[ ${LOW_RAM:-0} == 1 ]] && need_mb=6144
   if (( mem_mb >= need_mb )); then info "Memory inside: ${mem_mb} MB"
   else
@@ -318,7 +359,7 @@ check_machine() {
     warn "  container machine set -n $MACHINE memory=17G && container machine stop $MACHINE"; ok=0
   fi
 
-  disk_gb=$(m_run sh -c "df -Pk / | awk 'NR==2 {printf \"%d\", \$4/1024/1024}'" | tr -d '\r')
+  disk_gb=$(m_probe diskgb | tail -n 1); [[ $disk_gb =~ ^[0-9]+$ ]] || disk_gb=0
   if (( disk_gb >= 15 )); then info "Free disk: ${disk_gb} GB"
   else warn "Only ${disk_gb} GB free on / ; Ops Manager + MongoDB need ~10-15 GB."
   fi
@@ -329,7 +370,10 @@ check_machine() {
     fi
   fi
   fix_machine_dns || ok=0
-  info "IP: $(machine_ip)"
+  local ip; ip=$(machine_ip)
+  if [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then info "IP: $ip"
+  else warn "Could not read the machine IP (got '${ip}')."; ok=0
+  fi
   (( ok == 1 )) || die "The machine is not usable for the lab. See the warnings above.
 If the architecture or systemd check fails, Rosetta cannot run this machine: use an x86_64 Linux VM instead."
 }
@@ -358,8 +402,9 @@ install_lab() {
 }
 
 show_url() {
+  write_probe
   local url; url=$(m_root bash "$(lab_path)" url 2>/dev/null | tr -d '\r' | tail -n 1 || true)
-  [[ -n $url ]] || url="http://$(machine_ip):8080"
+  [[ $url == http://* ]] || url="http://$(machine_ip):8080"
   log "Ops Manager: $url"
   info "Shell in the machine:  bash $0 shell"
   info "Stop (frees the RAM):  bash $0 stop"
@@ -394,6 +439,7 @@ cmd_check() {
 start_lab() {
   log "Starting machine $MACHINE and the lab"
   m_run true
+  write_probe
   fix_machine_dns || warn "Continuing: the lab can start without internet, but downloads will fail."
   container machine run -n "$MACHINE" --root -e OMLAB_PLATFORM=apple-container -- bash "$(lab_path)" start
 }
